@@ -128,7 +128,7 @@ def getSongSet(filename):
 ###################################################
 res = list()
 
-for hour in range(0,1):
+for hour in range(0,24):
 	listeningHistoryFile = listeningHistoryFolder + "csv_" + str(hour) + ".csv"
 	playlistSorted = getLongestPlaylist(listeningHistoryFile)
 	
