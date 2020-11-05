@@ -1,17 +1,14 @@
-import csv
 import sys
 from datetime import datetime
 from scipy.spatial import distance
 import math
-
+import pprint
+import time
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import spotipy.util as util
-import pprint
-import time
 
 import conf
-
 
 
 def getBestPlaylistInSongSet(playlist_original, songs, removeSelectedVertex=True):
@@ -265,14 +262,9 @@ def recommenderPoolSongs(songs, numFinalSongs, retryLimit=3):
 	return recommended_pool
 	
 
-
-
 def getTimeStr():
 	now = datetime.now()
 	return now.strftime("%Y-%m-%dT%H:%M:%SZ") #"%Y-%m-%dT%H:%M:%S.%fZ"
-
-
-
 
 def euclideanDistance(song1,song2):
 	if len(song1["features"]) != len(song2["features"]):

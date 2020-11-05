@@ -1,14 +1,11 @@
 import csv
 import sys
 from datetime import datetime
-from scipy.spatial import distance
 import math
 import glob
 import os
-import json
 
 import mylib
-
 
 # Params
 listeningHistoryFolder = "input/listeningHistory/"
@@ -17,8 +14,6 @@ songsetFolder_2 = "input/songset_2/"
 resFolder = "output/" + mylib.getTimeStr() + "/"
 resValuesFilename = "results.tsv"
 noRepeatedSongs = False
-
-
 
 
 def getSongSetAcronym(songsetType):
@@ -61,10 +56,10 @@ def getSongSetFiles(hour):
 	return res
 
 
-### NOTA ### NOTA ### NOTA ### NOTA ### NOTA ### NOTA ###
-# serve per prendere header di listeningHistoryFile     #
+####################################################
+# Required to get listeningHistoryFile header      #
 csvBigFile = 'input/CSV_BIG.csv'
-#########################################################
+
 featureList = ['acousticness','danceability','energy','instrumentalness','key','liveness','loudness','mode','speechness','tempo','time_signature','valence']
 
 # Produce a list of dictionaries, one for each song.
@@ -92,10 +87,6 @@ def getLongestPlaylist(filename):
 	playlist = list()
 	with open(filename, encoding="ISO-8859-1") as csvfile:
 		reader = csv.DictReader(csvfile, delimiter=';', fieldnames=firstLine)
-		# EQUIVALENTE: ordine lessicografico - un campo 
-		#sortedlist = sorted(reader, key=lambda row: row['played_at'], reverse=False)
-		# NOTA: ordine lessicografico - due campi 
-		#sortedlist = sorted(reader, key=lambda row:(row['date'],row['datetime']), reverse=False)
 		try:
 			sortedlist = sorted(reader, key=lambda row: datetime.strptime(row['played_at'], '%Y-%m-%dT%H:%M:%S.%fZ'), reverse=False)
 		except:
@@ -132,14 +123,16 @@ def getSongSet(filename):
 	return getArrayFeatures(res, featureList)
 
 
-
+###################################################
+# EXPERIMENTS START HERE # EXPERIMENTS START HERE #
+###################################################
 res = list()
 
 for hour in range(0,1):
 	listeningHistoryFile = listeningHistoryFolder + "csv_" + str(hour) + ".csv"
 	playlistSorted = getLongestPlaylist(listeningHistoryFile)
 	
-	### NEW OPT. ALGORITHM VERSION ###
+	### DYNAMIC ALGORITHM - DYN-1,...,DYN-4 ###
 	songSetFiles = getSongSetFiles(hour)
 	for songsetType in songSetFiles.keys():
 		songSetFile = songSetFiles[songsetType]
@@ -155,7 +148,6 @@ for hour in range(0,1):
 		temp = {"acronym": getSongSetAcronym(songsetType), "hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": songsetType + "_" + "{:02d}".format(hour), "songset file": songSetFile, "songset length": len(songset), "playlist type": "Dynamic programming algorithm", "playlist length": len(optimal_playlist["playlist"]), "PPD value": optimal_playlist["weight"], "computed playlist": optimal_playlist["playlist"]}
 		res.append(temp)
 
-
 	### Playlist generated with Spotify's Recommender ###
 	### REC-1
 	recommended_playlist = mylib.recommenderSingleSong(playlistSorted,temp["playlist length"],True)
@@ -163,12 +155,10 @@ for hour in range(0,1):
 	temp = {"acronym": "REC-1", "hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": "Recommender_1song_features_" + "{:02d}".format(hour), "songset file": "", "songset length": 0, "playlist type": "Spotify Recommender (1 song with features)", "playlist length": len(recommended_playlist), "PPD value": distance, "computed playlist": recommended_playlist}
 	res.append(temp)
 	
-	
 	#recommended_playlist = mylib.recommenderSingleSong(playlistSorted,temp["playlist length"],False)
 	#distance = mylib.computePD(playlistSorted, recommended_playlist)
 	#temp = {"hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": "Recommender_1song_" + "{:02d}".format(hour), "songset file": "", "songset length": 0, "playlist type": "Spotify Recommender (1 song NO features)", "playlist length": len(recommended_playlist), "PPD value": distance, "computed playlist": recommended_playlist}
 	#res.append(temp)
-	
 	
 	### REC-2
 	recommended_playlist_prevnext = mylib.recommenderPrevNextSong(playlistSorted,temp["playlist length"],True)
@@ -176,12 +166,10 @@ for hour in range(0,1):
 	temp = {"acronym": "REC-2", "hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": "Recommender_prev-next_features_" + "{:02d}".format(hour), "songset file": "", "songset length": 0, "playlist type": "Spotify Recommender (prev-next with features)", "playlist length": len(recommended_playlist_prevnext), "PPD value": distance, "computed playlist": recommended_playlist_prevnext}
 	res.append(temp)
 	
-	
 	#recommended_playlist_prevnext = mylib.recommenderPrevNextSong(playlistSorted,temp["playlist length"],False)
 	#distance = mylib.computePD(playlistSorted, recommended_playlist_prevnext)
 	#temp = {"hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": "Recommender_prev-next_" + "{:02d}".format(hour), "songset file": "", "songset length": 0, "playlist type": "Spotify Recommender (prev-next NO features)", "playlist length": len(recommended_playlist_prevnext), "PPD value": distance, "computed playlist": recommended_playlist_prevnext}
 	#res.append(temp)
-	
 	
 	### DYN-1
 	songSetFileKM = songSetFiles["KM"]
@@ -197,7 +185,6 @@ for hour in range(0,1):
 	temp = {"acronym": "HYB-1", "hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": "Recommender_pool_" + "{:02d}".format(hour), "songset file": "", "songset length": len(recommended_playlist_pool), "playlist type": "Spotify Recommender (pool + dynamic algorithm) - pool 1x", "playlist length": len(optimal_playlist["playlist"]), "PPD value": distance, "computed playlist": optimal_playlist["playlist"]}
 	res.append(temp)
 
-
 	### DYN-2
 	recommended_playlist_pool = mylib.recommenderPoolSongs(playlistSorted,2*poolSize)
 	optimal_playlist = mylib.getBestPlaylistInSongSet(playlistSorted,recommended_playlist_pool[0:poolSize],noRepeatedSongs)
@@ -208,7 +195,6 @@ for hour in range(0,1):
 	temp = {"acronym": "HYB-2", "hour": "{:02d}".format(hour), "listening history length": len(playlistSorted), "songset type": "Recommender_pool_" + "{:02d}".format(hour), "songset file": "", "songset length": len(recommended_playlist_pool), "playlist type": "Spotify Recommender (pool + dynamic algorithm) - pool 2x", "playlist length": len(optimal_playlist["playlist"]), "PPD value": distance, "computed playlist": optimal_playlist["playlist"]}
 	res.append(temp)
 	
-
 	### DYN-4
 	recommended_playlist_pool = mylib.recommenderPoolSongs(playlistSorted,4*poolSize)
 	optimal_playlist = mylib.getBestPlaylistInSongSet(playlistSorted,recommended_playlist_pool[0:poolSize],noRepeatedSongs)
