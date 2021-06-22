@@ -41,15 +41,14 @@ def songs_byHour(df, h):
     sys.exit()
   if type(h) == int:
     h = "{:02d}".format(h)
-  print(h)
-  temp = df[df["time-hour"] == h]
-  print(temp)
+  return df[df["time-hour"] == h]
+  
 
 
 
 
-#contents = glob(f"{csv_folder}*.csv")
-contents = glob(csv_folder + "*.csv")
+contents = glob(f"{csv_folder}*.csv")
+#contents = glob(csv_folder + "*.csv")
 
 contents.sort()
 for filename in contents:
@@ -59,9 +58,8 @@ for filename in contents:
   df["endTime"] = pd.to_datetime(df["endTime"], format="%Y-%m-%d %H:%M")
   df = df.sort_values(by=["endTime"])
   df_filtered = df[df["msPlayed"] > min_msPlayed]
-  #print(f"File: {filename} - Size: {df_filtered.shape[0]}/{numLines}")
-  print("File: " + filename + " - Size: " + str(df_filtered.shape[0]) + "/" + str(numLines))
-  #print(df_filtered.head(50))
+  print(f"File: {filename} - Size: {df_filtered.shape[0]}/{numLines}")
+  #print("File: " + filename + " - Size: " + str(df_filtered.shape[0]) + "/" + str(numLines))
   
   #df_filtered["date"] = df_filtered["endTime"].apply(lambda x: x.date())
   temp = df_filtered["endTime"].apply(lambda x: str(x.date()))
@@ -75,7 +73,8 @@ for filename in contents:
   #print(df_filtered[["date","trackName"]].head(10))
   #print(df_filtered.groupby(["date","time-hour"]).count())
 
-  songs_byHour(df_filtered, "09")
+  print(songs_byHour(df_filtered, "09"))
+  print(df_filtered.info())
   sys.exit()
   
   ntna_ntka = computeNTNA_NTKA(df_filtered)
