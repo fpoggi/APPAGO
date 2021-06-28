@@ -1,0 +1,3 @@
+Notes Spotify.py:
+1. distanza euclidea sbagliata
+2. riga 634: credo sia da fare semplicemente 4 volte (per ogni cluster - vedi ciclo esterno)
