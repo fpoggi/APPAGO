@@ -1,3 +1,4 @@
+import json 
 import pandas as pd 
 
 from sklearn.cluster import KMeans
@@ -11,11 +12,18 @@ from scipy.spatial import distance
 
 from glob import glob
 import sys
-  
+
+import time
+import conf
+import spotipy
+from spotipy.oauth2 import SpotifyClientCredentials
+import spotipy.util as util
+
+
 csv_folder = "../listening-history/csv/"
 min_msPlayed = 10000
 maxClusters = 10
-
+num_tracks = 100
 
 # loads csv data into a dataframe.
 # filters songs by size (length >= min_ms_played)
@@ -155,23 +163,15 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
     #cl=kmeans.labels_.tolist()
     K = kmeans.labels_
     
-    
     clf = NearestCentroid()
     clf.fit(df, K)
     centroids = clf.centroids_
 
-    
-    
-    
-    
     # add cluster labels to the DF
     df_temp = df.copy(deep=True)
     df_temp.insert(loc=len(df_temp.columns),column="kLabel",value=K)
     #df_count = df_temp.groupby(df_temp["kLabel"]).count()
     #sys.exit()
-    
-    
-    
     
     # costruisco il clustering come serve a me
     cl = [ ] 
@@ -180,7 +180,6 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
     for i in range(0,len(K)):
       cl[K[i]].append(i)
     
-
     # manage clusters with less than 4 songs
     clustersToExclude = list()
     for i in range(1,k):
@@ -189,19 +188,14 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
         clustersToExclude.append(i)
     
     if len(clustersToExclude) > 0:
-      # 
       if approach == "exclude_K_less_4_songs":
-      #cerco cluster con minor numero di songs (per controllare che #songs nei cluster sia >= 4 - per passi seguenti)
-      #minSongs = len(cl[0])
-      #for i in range(1,k):
-      #  numSongs = len(cl[i])
-      #  if numSongs < minSongs:
-      #    minSongs = numSongs
-      #if  minSongs < 4:
-      #  continue
+        # escludo clusterizzazione con k cluster (uscendo dal ciclo, quindi senza verificare se è best con DaviesBouldinIndex)
         continue
 
       elif approach == "exclude_cluster_less_4_songs":
+        print("ERROR: best_k_means() with param. approach='exclude_cluster_less_4_songs' not yet implemented. EXIT.")
+        sys.exit()
+        """
         print(clustersToExclude)
         print(df_temp.shape[0])
         df_temp2 = df_temp[~df_temp["kLabel"].isin(clustersToExclude)]
@@ -220,10 +214,7 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
           cl.append([ ])
         for i in range(0,len(K)):
           cl[K[i]].append(i)
-        
-
-    
-    
+        """
     
     db = DaviesBouldinIndex(centroids, cl, df.values.tolist())
     if db < bDB:
@@ -277,7 +268,7 @@ def linearHeuristic(df, best_Kmeans):
     numPoints = df_slice.shape[0]
     songsDFs.append(df_slice.iloc[[0, numPoints // 3 - 1, (numPoints // 3) * 2 - 1, numPoints - 1]])
     
-  return songsDFs #{"songsByCluster": songsDFs, "centroids": kCentroids}
+  return songsDFs #pd.concat(songsDFs)  #{"songsByCluster": songsDFs, "centroids": kCentroids}
 
 
 
@@ -316,6 +307,9 @@ def getPointAllowedFeatureValues():
   
 def sphereHeuristic(df, best_Kmeans, num_track = 50):
   
+  # results here
+  minDistSongs = list()
+  
   df_copy = df.copy(deep=True)
 
   kLength = best_Kmeans["best-length"] # numero di cluster
@@ -323,6 +317,9 @@ def sphereHeuristic(df, best_Kmeans, num_track = 50):
   kCentroids = best_Kmeans["best-centroids"]
   kLabels = best_Kmeans["best-labels"]
 
+  print(f"sphereHeuristic(): number of flusters = {kLength}")
+  #sys.exit()
+  
   # add cluster labels to the DF
   df_copy.insert(loc=len(df_copy.columns),column="kLabel",value=kLabels)
   
@@ -343,7 +340,10 @@ def sphereHeuristic(df, best_Kmeans, num_track = 50):
   df_copy.insert(loc=len(df_copy.columns),column="kDistance",value=distances)
   
   df_copy.sort_values(by=["kLabel","kDistance"], inplace=True)
- 
+  
+  #print(df_copy[df_copy["TrackID"] == "5Jl1pMK3ffjw5nkbFUlseM"])
+  #sys.exit()
+  
   for i in range(0,kLength):
     df_slice = df_copy[df_copy["kLabel"] == i]
     
@@ -351,7 +351,7 @@ def sphereHeuristic(df, best_Kmeans, num_track = 50):
     #radius = RandC[0]
     farthestPoint = df_slice.iloc[df_slice.shape[0]-1]
     radius = farthestPoint["kDistance"]
-    RandC = [radius, farthestPoint]
+    #RandC = [radius, farthestPoint]
     
     #genera 5 punti a caso nella sfera con centro il centroide e raggio quello che e' --> f matrice con un punto per riga
     #center = np.array(centroidi[i])
@@ -367,54 +367,197 @@ def sphereHeuristic(df, best_Kmeans, num_track = 50):
     #controllo che i valori siano nei range, altrimenti li modifico accordingly
     # conto quanti punti diversi trovo con track_id diversi --> np fino a 5
     #num_track = 50
-    pp = 0
-    totp = int(num_track/(4*kLength)) + 1 
+    
+    #pp = 0
+    #totp = int(num_track/(4*kLength)) + 1 
     # tengo lista track_id
-    tr = [ ]
+    #tr = [ ]
     ##################################################
     # END TODO FPOGGI: questo va portato fuori dal ciclo #
     ##################################################
     
     j = 0
-    print ("ciclo i" , i)
+    print ("ciclo i:" , i, " - num songs in cluster:", df_slice.shape[0])
     
     minDistTrackIds = list()
-    minDistSongs = list()
     # ciclo da ripetere totp ()volte
     #while (j < len(f) and pp <= totp ):
-    while (i==4 and j<len(f) and len(minDistSongs)<4):
+    while (j<len(f) and len(minDistTrackIds)<4):
     #for j in range (0,4):
       currRandomPoint = f[j]
       print("\t",i,j)
       #print(currRandomPoint)
-      print("\t",df_slice["kCoordinates"])#.shape[0])
+      #print("\t",df_slice["kCoordinates"])#.shape[0])
       
       #1. minD, closest (indice della canz. nel cluster) e seed (la canzone del cluster) = del punto del cluster più vicino al j-esimo casuale
       #2. newP = punto con coordinate nel range previsto delle audio feature, partendo da j-esimo punto casuale
       minDist = -1
       for index, row in df_slice.iterrows():
-        #print(row)
-        #sys.exit()
         dist = distance.euclidean(currRandomPoint, row["kCoordinates"])
+        #print(f"{dist} - {row['id2']}")
         if dist < minDist or minDist == -1:
           minDist = dist
           minDistSong = row
       
+      # TODO FPOGGI: verificare
+      # in teoria se punto più vicino al pto random è già preso dovrei skippare, ma così li scarto tutti.
+      # Quindi decido di scegliere il punto più vicino al punto random e poi toglierlo da quelli possiibili. Così in 4 passaggi ho fatto. 
+      """
       if minDistSong["TrackID"] not in minDistTrackIds:
         minDistTrackIds.append(minDistSong["TrackID"])
         minDistSongs.append({"minDist": minDist, "minDistSong": minDistSong})
       else:
         print("Already selected: skip.")
+      """
+      minDistTrackIds.append(minDistSong["TrackID"])
+      minDistSongIndex = len(minDistSongs) #i*4+j
+      minDistSongs.append({"index": minDistSongIndex, "randomPoint": currRandomPoint, "minDistSong": minDistSong, "minDist": minDist})
+      df_slice.drop(df_slice[df_slice["TrackID"] == minDistSong["TrackID"]].index) #, inplace=True)
+  
       j += 1
-    
+      
     print(len(minDistSongs))
     #sys.exit()  
-      
-                
-  return "ciao"
+    
+  return minDistSongs
 
 
 
+
+
+
+"""
+def recommenderPrevNextSong(songs, numSongs, useFeatures=True, retryLimit=3):
+	if numSongs > len(songs):
+		print ("ERROR in recommenderPrevNextSong(): requested %d songs for a playlist composed of %d songs." % (numSongs, len(songs)))
+		sys.exit()
+	
+	recommended_playlist = list()
+	
+	token = util.prompt_for_user_token(
+		username=conf.username,
+		scope=conf.scope,
+		client_id=conf.client_id,
+		client_secret=conf.client_secret,
+		redirect_uri=conf.redirect_uri)
+
+	# NB: per ogni listening history file, tutte le playlist generate dall'algoritmo sopra hanno lo stesso numero di canzoni => prendo #canzoni ultima playlist generata 
+	for i in range(0, numSongs):
+		if i == 0:
+			songs_seeds = [songs[i]["trackId"], songs[i+1]["trackId"]]
+		elif i == (numSongs-1):
+			songs_seeds = [songs[i-1]["trackId"], songs[i]["trackId"]]
+		else:
+			songs_seeds = [songs[i-1]["trackId"], songs[i]["trackId"],songs[i+1]["trackId"]]
+			
+		retry = 0
+		while token and retry < retryLimit:
+			try:
+				sp = spotipy.Spotify(auth=token)
+				if useFeatures:
+					song = songs[i]
+					result = sp.recommendations(seed_tracks=songs_seeds,target_acousticness=song["features"][0],danceability=song["features"][1],target_energy=song["features"][2],target_instrumentalness=song["features"][3],target_key=int(song["features"][4]),target_liveness=song["features"][5],target_loudness=song["features"][6],target_mode=int(song["features"][7]),target_speechiness=song["features"][8],target_tempo=song["features"][9],target_time_signature=int(song["features"][10]),target_valence=song["features"][11],limit=1)
+				else:
+					result = sp.recommendations(seed_tracks=songs_seeds,limit=1)
+				recommendedTrackId = result["tracks"][0]["id"]
+
+				recommendedAudioFeatures = sp.audio_features([recommendedTrackId])
+				recommended_song = {"trackId": recommendedTrackId, "features": [recommendedAudioFeatures[0]["acousticness"],recommendedAudioFeatures[0]["danceability"],recommendedAudioFeatures[0]["energy"],recommendedAudioFeatures[0]["instrumentalness"],recommendedAudioFeatures[0]["key"],recommendedAudioFeatures[0]["liveness"],recommendedAudioFeatures[0]["loudness"],recommendedAudioFeatures[0]["mode"],recommendedAudioFeatures[0]["speechiness"],recommendedAudioFeatures[0]["tempo"],recommendedAudioFeatures[0]["time_signature"],recommendedAudioFeatures[0]["valence"]]}
+					
+				recommended_playlist.append(recommended_song)
+				break
+			except:
+				print (songs[i])
+				print ("recommenderPrevNextSong()- Retry #" + str(retry) + " problem:", songs[i]["trackId"])
+				retry += 1
+				time.sleep(5)
+		
+		if retry >= retryLimit:
+			print ("ERROR: recommenderPrevNextSong() retry limit %d - song %s" % (retryLimit,song["trackId"]))
+			sys.exit()
+	
+	return recommended_playlist
+"""
+
+def isSongInSongsList(trackId, songs):
+  found = False
+  for song in songs:
+    print(f"Comparing {trackId} - {song['id']}")
+    if trackId == song["id"]:
+      print("Song Found!")
+      found = True
+      break
+  return found
+  
+def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3):
+  
+  results = list()
+  #client_credentials_manager = SpotifyClientCredentials(client_id=conf.client_id, client_secret=conf.client_secret)
+  #sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+  token = util.prompt_for_user_token(
+    username=conf.username,
+    scope=conf.scope,
+    client_id=conf.client_id,
+    client_secret=conf.client_secret,
+    redirect_uri=conf.redirect_uri)
+  
+  #print(f"len features = {len(features)}")
+  retry = 0
+  #found = False
+  while token and retry < retryLimit and num_songs > 0: #(not found): #and token: 
+    try:
+      sp = spotipy.Spotify(auth=token)
+      #print(f"length features: {len(features)} - acousticness: {features['Acousticness']}")
+      #print(type(features))
+      if len(features)>0:
+        recomms = sp.recommendations(seed_tracks=[seed_track],
+          limit=num_songs,
+          target_acousticness=features["Acousticness"],
+          danceability=features["Danceability"],
+          target_energy=features["Energy"],
+          target_instrumentalness=features["Instrumentalness"],
+          target_key=int(features["Key"]),
+          target_liveness=features["Liveness"],
+          target_loudness=features["Loudeness"],
+          target_mode=int(features["Mode"]),
+          target_speechiness=features["Speechiness"],
+          target_tempo=features["Tempo"],
+          target_time_signature=int(features["Time_signature"]),
+          target_valence=features["Valence"])
+      else:
+        recomms = sp.recommendations(seed_tracks=[seed_track], limit=num_songs)
+      for track in recomms["tracks"]:
+        track_id = track["id"]
+        features = sp.audio_features(track_id)[0]
+        
+        features["trackName"]  = track["name"]
+        features["artistName"] = " ".join([artist["name"] for artist in track["artists"]])
+        features["popularity"] = track["popularity"]
+        
+        album_id = track["album"]["id"]
+        print(f"URL: https://open.spotify.com/album/{album_id}?highlight=spotify:track:{track_id}")
+        #Acousticness	Danceability	Energy	Speechiness	Instrumentalness	Liveness	Valence	Loudeness	Tempo	Time_signature	Key	Mode
+        
+        if not isSongInSongsList(trackId, songsList):
+          results.append(features)
+          num_songs -= 1
+        
+      #found = True
+    except Exception as e:
+      print (f"recommenderGetSongs()- Retry #{retry} - song: {seed_track}")
+      print(e)
+      retry += 1
+      time.sleep(5)
+    
+    if retry >= retryLimit:
+      print ("ERROR: recommenderGetSongs() retry limit {retryLimit} - song: {seed_track}")
+      sys.exit()
+  
+  return results
+
+#res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", 3, list(), retryLimit=1)
+#print(res)
+#sys.exit()
 
 
     
@@ -446,12 +589,75 @@ for filename in contents:
   #test_kmeans(df_filtered)
   df_h_feat = df_h[["Acousticness", "Danceability", "Energy", "Instrumentalness", "Key", "Liveness", "Loudeness", "Mode", "Speechiness", "Tempo", "Time_signature", "Valence"]]
   
-  best_Kmeans = best_k_means(df_h_feat, maxClusters, "exclude_cluster_less_4_songs")
-  sys.exit()
-  #linear_kMeans = linearHeuristic(df_h, best_Kmeans)
-  sphere_kMeans = sphereHeuristic(df_h, best_Kmeans)
-  #print(res)
+  best_Kmeans = best_k_means(df_h_feat, maxClusters, "exclude_K_less_4_songs") #"exclude_cluster_less_4_songs")
   
+  
+  
+  kLength = best_Kmeans["best-length"]
+  numReqs_perPoint = int(num_tracks/(4*kLength)) + 1
+  feature_names = ["Acousticness","Danceability","Energy","Speechiness","Instrumentalness","Liveness","Valence","Loudeness","Tempo","Time_signature","Key","Mode"]
+  
+  ########################
+  ### LINEAR HEURISTIC ###
+  ########################
+  """
+  linear_kMeans = linearHeuristic(df_h, best_Kmeans)
+  #print(linear_kMeans[0].iloc[0])
+  #print(linear_kMeans)
+  ###########################
+  ### RECOMMENDER SPOTIFY ###
+  ###########################
+  results = list()
+  for df_group in linear_kMeans:
+    # FIRST SONG
+    print(f"SONG #1")
+    firstPoint = df_group.iloc[0]
+    trackId = firstPoint["TrackID"]
+    # get features
+    centroidFeatures_list = firstPoint["kCentroid"]
+    features = dict()
+    for index in range(0,len(centroidFeatures_list)):
+      features[feature_names[index]] = centroidFeatures_list[index]
+    #print(features)
+    tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
+    results.extend(tracks)
+    print(len(results))
+    #res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", numReqs_perPoint, list(), retryLimit=1)
+    # OTHER THREE SONGS
+    for i in range(1,4):
+      print(f"SONG #{i}")
+      point = df_group.iloc[i]
+      trackId = point["TrackID"]
+      tracks = recommenderGetSongs(trackId, point, numReqs_perPoint, results, retryLimit=1)
+      results.extend(tracks)
+      print(len(results))
+  """
+  
+  ########################
+  ### SPHERE HEURISTIC ###
+  ########################
+  sphere_kMeans = sphereHeuristic(df_h, best_Kmeans)
+  #print(sphere_kMeans)
+  
+  ###########################
+  ### RECOMMENDER SPOTIFY ###
+  ###########################
+  results = list()
+  for item in sphere_kMeans:
+    #{"index": minDistSongIndex, "randomPoint": currRandomPoint, "minDistSong": minDistSong, "minDist": minDist}
+    randomPoint = item["randomPoint"]
+    features = dict()
+    for index in range(0,len(randomPoint)):
+      features[feature_names[index]] = randomPoint[index]
+    #for index in range(0,len(centroidFeatures_list)):
+    #  features[feature_names[index]] = centroidFeatures_list[index]
+    
+    clusterMinDistSong = item["minDistSong"]
+    trackId = clusterMinDistSong["TrackID"]
+    tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
+    results.extend(tracks)
+  
+  print(results)
   sys.exit()
   
   #for index, row in df_filtered.iterrows():
@@ -510,7 +716,7 @@ Muse
 2018-11-09
 spotify:track:0Tjw5aLMwzCki7ADdLwddL
 0.817
-0.522
+0.522sphereHeuristic(
 0.475
 0.0291
 3.29e-06
