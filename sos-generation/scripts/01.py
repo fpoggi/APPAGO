@@ -226,7 +226,7 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
     print("\tnumber of clusters = ", len(cl))#, " - minSongs = ", minSongs)
     print("\tDB = ", db)
   
-  # if no k satisfies the condition #songs-in-cluster >= 4, return all the songs (i.e. one cluster)
+  # if no k satisfies the condition #songs-in-cluster >= 4, return all the songs (i.e. one cluster) - *S2.1*
   try:
     print("\tbest number of clusters = ", len(bcl))
     print("\tbestDB = ", bDB)
@@ -242,27 +242,21 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
     #K = kmeans.labels_
     temp = [0 for i in range(0, df.shape[0])]
     temp.append(1)
-    K = pd.Series(temp)
-    
-    #to_append = [5, 6]
-    #a_series = pd.Series(to_append, index = df.columns)
-    #df = df.append(a_series, ignore_index=True)
-    
-    #a_series = pd.Series(np.random.randn(12), index = df.columns)
-    #df = df.append(a_series, ignore_index=True)
-    
-    #print(df.iloc[0])
-    #print(df.info())
-    #print(df.iloc[len(df)-1].name + 1)
-    #df.loc[len(df)] = np.random.randn(12).tolist()
-    df.loc[-1] = np.random.randn(12).tolist()
+    K_temp = pd.Series(temp)
+
+    df_temp2 = df.copy(deep=True)
+    df_temp2.loc[-1] = np.random.randn(12).tolist()
     
     clf = NearestCentroid()
-    clf.fit(df, K)
-    centroids = clf.centroids_
-    print(centroids)
-    sys.exit()
-  
+    clf.fit(df_temp2, K_temp)
+    centroids_temp = clf.centroids_
+    #print(centroids)
+    
+    bcl = list()
+    bcl.append([0 for i in range(0, df.shape[0])])
+    centroids = np.delete(centroids_temp, 1, axis=0)
+    bLabels = pd.Series([0 for i in range(0, df.shape[0])])
+    return {"best-length": 1, "best-index-list": bcl, "best-centroids": centroids, "best-labels": bLabels}
 
 def linearHeuristic(df, best_Kmeans):
   
