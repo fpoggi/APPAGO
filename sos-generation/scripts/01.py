@@ -21,6 +21,7 @@ import spotipy.util as util
 
 
 csv_folder = "../listening-history/csv/"
+output_folder = "../songset/"
 min_msPlayed = 10000
 maxClusters = 10
 num_tracks = 100
@@ -148,7 +149,7 @@ def DaviesBouldinIndex(cc, cl, M):
 
 def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
   # primo cluster contenente tutto l'insieme di elementi
-  bDB = 100
+  bDB = 1000
     
   #costruisco gli altri cluster - voglio che si possa fare in maniera incrementale
   # k e' l'effettivo numero di cluster: il primo viene costruito prima del while
@@ -156,7 +157,8 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
   #print(df_features.head().values.tolist())
 
   for k in range(2,maxClusters+1):
-        
+    
+    #print(f"k={k}")
     kmeans = KMeans(n_clusters=k, random_state=1).fit(df)
   
     #TODO: DELETE
@@ -221,14 +223,45 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
       bDB = db
       bcl = cl
       bLabels = K
-    print("number of cluster = ", len(cl))#, " - minSongs = ", minSongs)
-    print("DB = ", db)
-        
-  print("best number of cluster = ", len(bcl))
-  print("bestDB = ", bDB)
+    print("\tnumber of clusters = ", len(cl))#, " - minSongs = ", minSongs)
+    print("\tDB = ", db)
   
-  # restituisce il numero di cluster e le liste con i numeri di riga degli elementi in ogni cluster (centro incluso)
-  return {"best-length": len(bcl), "best-index-list": bcl, "best-centroids": centroids, "best-labels": bLabels}
+  # if no k satisfies the condition #songs-in-cluster >= 4, return all the songs (i.e. one cluster)
+  try:
+    print("\tbest number of clusters = ", len(bcl))
+    print("\tbestDB = ", bDB)
+    # restituisce il numero di cluster e le liste con i numeri di riga degli elementi in ogni cluster (centro incluso)
+    return {"best-length": len(bcl), "best-index-list": bcl, "best-centroids": centroids, "best-labels": bLabels}
+  except:
+    print("\tWARNING: best number of clusters = 1")
+    #bcl = list()
+    #for index in range(0, df.shape[0]):
+    #  bcl.append(index)
+    
+    #bcl=list(range(0, df.shape[0]))
+    #K = kmeans.labels_
+    temp = [0 for i in range(0, df.shape[0])]
+    temp.append(1)
+    K = pd.Series(temp)
+    
+    #to_append = [5, 6]
+    #a_series = pd.Series(to_append, index = df.columns)
+    #df = df.append(a_series, ignore_index=True)
+    
+    #a_series = pd.Series(np.random.randn(12), index = df.columns)
+    #df = df.append(a_series, ignore_index=True)
+    
+    #print(df.iloc[0])
+    #print(df.info())
+    #print(df.iloc[len(df)-1].name + 1)
+    #df.loc[len(df)] = np.random.randn(12).tolist()
+    df.loc[-1] = np.random.randn(12).tolist()
+    
+    clf = NearestCentroid()
+    clf.fit(df, K)
+    centroids = clf.centroids_
+    print(centroids)
+    sys.exit()
   
 
 def linearHeuristic(df, best_Kmeans):
@@ -418,7 +451,7 @@ def sphereHeuristic(df, best_Kmeans, num_track = 50):
       
     print(len(minDistSongs))
     #sys.exit()  
-    
+  
   return minDistSongs
 
 
@@ -560,115 +593,135 @@ def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3
 #sys.exit()
 
 
+
+def saveSongset(songsList, folderName, fileName):
+  #{'danceability': 0.582, 'energy': 0.314, 'key': 2, 'loudness': -11.886, 'mode': 0, 'speechiness': 0.313, 'acousticness': 0.458, 'instrumentalness': 0.342, 'liveness': 0.0986, 'valence': 0.427, 'tempo': 73.525, 'type': 'audio_features', 'id': '5KBiox7vnG3cnljh8MPBp8', 'uri': 'spotify:track:5KBiox7vnG3cnljh8MPBp8', 'track_href': 'https://api.spotify.com/v1/tracks/5KBiox7vnG3cnljh8MPBp8', 'analysis_url': 'https://api.spotify.com/v1/audio-analysis/5KBiox7vnG3cnljh8MPBp8', 'duration_ms': 92168, 'time_signature': 1, 'trackName': 'altissima', 'artistName': 'evän', 'popularity': 38}
+  results = "track_id	acousticness	danceability	energy	instrumentalness	key	liveness	loudness	mode	speechness	tempo	time_signature	valence\n"
+  for song in songsList:
+    results += f"{song['id']}\t{song['acousticness']}\t{song['danceability']}\t{song['energy']}\t{song['instrumentalness']}\t{song['key']}\t{song['liveness']}\t{song['loudness']}\t{song['mode']}\t{song['speechiness']}\t{song['tempo']}\t{song['time_signature']}\t{song['valence']}\n"
+  with open(f"{folderName}/{fileName}", 'w') as f:
+    f.write(results)
+  
+
+
+
+
+
+# cluster_method: "kmeans|fbf"
+def generateSongset(csv_file, output_folder, cluster_method="kmeans", heuristic_method="linear", min_songs_hour=10, min_msPlayed=10000):
+  
+  df = loadData(csv_file, min_msPlayed)
+  
+  # 3.1
+  ntna_ntka = computeNTNA_NTKA(df)
     
+  for time_hour in range(0,24):
+    # 3.2 - FILTERING
+    df_h = songs_byHour(df, time_hour)
+    
+    # Remove duplicate songs
+    df_h.drop_duplicates(subset ="TrackID", keep = False, inplace = True)
+    
+    #df = df[df["time-hour"] == str(time_hour)]
+    print(f"num songs = {df_h.shape[0]}")
+    if df_h.shape[0] < min_songs_hour:
+      print(f"* hour {time_hour}: skip ({df_h.shape[0]} songs).")
+      continue
+    print(f"* hour {time_hour}: {df_h.shape[0]} songs.")
+    
+    #3.3 - CLUSTERING
+    df_h_feat = df_h[["Acousticness", "Danceability", "Energy", "Instrumentalness", "Key", "Liveness", "Loudeness", "Mode", "Speechiness", "Tempo", "Time_signature", "Valence"]]
+    
+    if cluster_method == "kmeans":
+      best_clustering = best_k_means(df_h_feat, maxClusters, "exclude_K_less_4_songs") #"exclude_cluster_less_4_songs")
+    elif cluster_method == "fbf":
+      print(f"ERROR in generateSongset(): {cluster_method} not yet implemented. Exit.")
+      sys.exit()
+    else:
+      print(f"ERROR in generateSongset(): cluster method {cluster_method} not defined. Exit.")
+      sys.exit()
+    
+    kLength = best_clustering["best-length"]
+    numReqs_perPoint = int(num_tracks/(4*kLength)) + 1
+    feature_names = ["Acousticness","Danceability","Energy","Speechiness","Instrumentalness","Liveness","Valence","Loudeness","Tempo","Time_signature","Key","Mode"]
+
+    """
+    ########################
+    ### LINEAR HEURISTIC ###
+    ########################
+    if heuristic_method == "linear":
+      linear_kMeans = linearHeuristic(df_h, best_clustering)
+      ###########################
+      ### RECOMMENDER SPOTIFY ###
+      ###########################
+      results = list()
+      for df_group in linear_kMeans:
+        # FIRST SONG
+        print(f"SONG #1")
+        firstPoint = df_group.iloc[0]
+        trackId = firstPoint["TrackID"]
+        # get features
+        centroidFeatures_list = firstPoint["kCentroid"]
+        features = dict()
+        for index in range(0,len(centroidFeatures_list)):
+          features[feature_names[index]] = centroidFeatures_list[index]
+        tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
+        results.extend(tracks)
+        print(len(results))
+        #res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", numReqs_perPoint, list(), retryLimit=1)
+        # OTHER THREE SONGS
+        for i in range(1,4):
+          print(f"SONG #{i}")
+          point = df_group.iloc[i]
+          trackId = point["TrackID"]
+          tracks = recommenderGetSongs(trackId, point, numReqs_perPoint, results, retryLimit=1)
+          results.extend(tracks)
+          print(len(results))
+    
+    ########################
+    ### SPHERE HEURISTIC ###
+    ########################  
+    elif heuristic_method == "sphere":
+      sphere_kMeans = sphereHeuristic(df_h, best_clustering)
+      ###########################
+      ### RECOMMENDER SPOTIFY ###
+      ###########################
+      results = list()
+      for item in sphere_kMeans:
+        #{"index": minDistSongIndex, "randomPoint": currRandomPoint, "minDistSong": minDistSong, "minDist": minDist}
+        randomPoint = item["randomPoint"]
+        features = dict()
+        for index in range(0,len(randomPoint)):
+          features[feature_names[index]] = randomPoint[index]
+        #for index in range(0,len(centroidFeatures_list)):
+        #  features[feature_names[index]] = centroidFeatures_list[index]
+        clusterMinDistSong = item["minDistSong"]
+        trackId = clusterMinDistSong["TrackID"]
+        tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
+        results.extend(tracks)
+      
+    else:
+      print(f"ERROR in generateSongset(): heuristic {cluster_method} not defined. Exit.")
+      sys.exit()
+      
+    print(results)
+    saveSongset(results, output_folder, "prova.tsv")
+    sys.exit()
+    """
+
+
+
+
+
+
+
 contents = glob(f"{csv_folder}*.csv")
 #contents = glob(csv_folder + "*.csv")
 
 contents.sort()
-for filename in contents:
-  print (filename)
-  df = loadData(filename, min_msPlayed)
-  
-  #df.to_csv("test.csv")
-  #print(df.groupby(["date","time-hour"]).count())
-  
-  # 3.1
-  ntna_ntka = computeNTNA_NTKA(df)
-  
-  # 3.2
-  #df_h = songs_byHour(df, "09")
-  df_h = df
-  
-  # Remove duplicate songs
-  df_h.drop_duplicates(subset ="TrackID",
-                     keep = False, inplace = True)
-  
-  #3.3
-  #K-MEANS
-  #print(df_filtered.columns.values)
-  #test_kmeans(df_filtered)
-  df_h_feat = df_h[["Acousticness", "Danceability", "Energy", "Instrumentalness", "Key", "Liveness", "Loudeness", "Mode", "Speechiness", "Tempo", "Time_signature", "Valence"]]
-  
-  best_Kmeans = best_k_means(df_h_feat, maxClusters, "exclude_K_less_4_songs") #"exclude_cluster_less_4_songs")
-  
-  
-  
-  kLength = best_Kmeans["best-length"]
-  numReqs_perPoint = int(num_tracks/(4*kLength)) + 1
-  feature_names = ["Acousticness","Danceability","Energy","Speechiness","Instrumentalness","Liveness","Valence","Loudeness","Tempo","Time_signature","Key","Mode"]
-  
-  ########################
-  ### LINEAR HEURISTIC ###
-  ########################
-  """
-  linear_kMeans = linearHeuristic(df_h, best_Kmeans)
-  #print(linear_kMeans[0].iloc[0])
-  #print(linear_kMeans)
-  ###########################
-  ### RECOMMENDER SPOTIFY ###
-  ###########################
-  results = list()
-  for df_group in linear_kMeans:
-    # FIRST SONG
-    print(f"SONG #1")
-    firstPoint = df_group.iloc[0]
-    trackId = firstPoint["TrackID"]
-    # get features
-    centroidFeatures_list = firstPoint["kCentroid"]
-    features = dict()
-    for index in range(0,len(centroidFeatures_list)):
-      features[feature_names[index]] = centroidFeatures_list[index]
-    #print(features)
-    tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
-    results.extend(tracks)
-    print(len(results))
-    #res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", numReqs_perPoint, list(), retryLimit=1)
-    # OTHER THREE SONGS
-    for i in range(1,4):
-      print(f"SONG #{i}")
-      point = df_group.iloc[i]
-      trackId = point["TrackID"]
-      tracks = recommenderGetSongs(trackId, point, numReqs_perPoint, results, retryLimit=1)
-      results.extend(tracks)
-      print(len(results))
-  """
-  
-  ########################
-  ### SPHERE HEURISTIC ###
-  ########################
-  sphere_kMeans = sphereHeuristic(df_h, best_Kmeans)
-  #print(sphere_kMeans)
-  
-  ###########################
-  ### RECOMMENDER SPOTIFY ###
-  ###########################
-  results = list()
-  for item in sphere_kMeans:
-    #{"index": minDistSongIndex, "randomPoint": currRandomPoint, "minDistSong": minDistSong, "minDist": minDist}
-    randomPoint = item["randomPoint"]
-    features = dict()
-    for index in range(0,len(randomPoint)):
-      features[feature_names[index]] = randomPoint[index]
-    #for index in range(0,len(centroidFeatures_list)):
-    #  features[feature_names[index]] = centroidFeatures_list[index]
-    
-    clusterMinDistSong = item["minDistSong"]
-    trackId = clusterMinDistSong["TrackID"]
-    tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
-    results.extend(tracks)
-  
-  print(results)
-  sys.exit()
-  
-  #for index, row in df_filtered.iterrows():
-  #  print(row["endTime"])
-  #  print(row["endTime"].date())
-  #  print(row["endTime"].hour)
-  
-  #break
-
-
-
+for csv_file in contents:
+  print (csv_file)
+  generateSongset(csv_file, output_folder, "kmeans", "linear", 10, min_msPlayed)
 
 
 
