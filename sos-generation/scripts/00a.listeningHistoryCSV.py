@@ -59,7 +59,14 @@ def getFeatures_old(song, retryLimit=3, sleepTime=0.3):
     return None
 """
 
-def getFeatures(song, token, retryLimit=2, sleepTime=0.3):
+def getFeatures(song, retryLimit=2, sleepTime=0.3):
+  token = util.prompt_for_user_token(
+    username=conf.username,
+    scope=conf.scope,
+    client_id=conf.client_id,
+    client_secret=conf.client_secret,
+    redirect_uri=conf.redirect_uri)
+
   found=False
   retry = 0
   while token and retry < retryLimit:
@@ -101,11 +108,9 @@ contents.sort()
 toSearchSongs = list()
 toSearchSeeds = list()
 C1 = 0
-#song_seeds = list()
 for json_file in contents:
   print (json_file)
   with open(json_file) as f:
-    res = "trackName;artistName;endTime;msPlayed;TrackID;Popularity;msDuration;Release_day;Uri;Acousticness;Danceability;Energy;Speechiness;Instrumentalness;Liveness;Valence;Loudeness;Tempo;Time_signature;Key;Mode;uri2;id2\n"
     songs = json.load(f)
     counter=1
     C1 += len(songs)
@@ -114,35 +119,63 @@ for json_file in contents:
       if seed not in toSearchSeeds:
         toSearchSeeds.append(seed)
         toSearchSongs.append(song)
-
 print(f"Canzoni totali: {C1} - canzoni uniche (senza rip.): {len(toSearchSeeds)}")
 
 
+# load saved searches from file
+if os.path.isfile(json_features_file):
+  with open(json_features_file) as f:
+    searchResults = json.load(f)
+else:
+  searchResults = dict()
+#print(len(searchResults))
+#for k in searchResults:
+#  if searchResults[k] is None:
+#    print(k)
+#sys.exit()
+
+
 # scarico info di ogni song unica in toSearchSongs =>
-searchResults = dict()
-token = util.prompt_for_user_token(
-  username=conf.username,
-  scope=conf.scope,
-  client_id=conf.client_id,
-  client_secret=conf.client_secret,
-  redirect_uri=conf.redirect_uri)
-counter = 1
+counter = 0
 for song in toSearchSongs:
+  
+  counter += 1
+  print(f"{counter}/{len(toSearchSongs)}")
+
+  # skip song if already downloaded (i.e. in saved searches) 
+  seed = f"{song['artistName']}-_-{song['trackName']}"
+  if seed in searchResults:
+    print("found")
+    continue
+  
+  # sometimes...
   if counter % 500 == 0:
+    # ...save results and
     with open(json_features_file, "w") as f:
       json.dump(searchResults, f, ensure_ascii=False, indent = 2)
-  #if counter > 20:
-  #  break
-  print(f"{counter}/{len(toSearchSongs)}")
-  res = getFeatures(song, token, retryLimit=3, sleepTime=0.3)
-  if res is not None:
-    searchResults[res['seed']] = res
-  counter += 1
+    # renew token
+    """
+    token = util.prompt_for_user_token(
+      username=conf.username,
+      scope=conf.scope,
+      client_id=conf.client_id,
+      client_secret=conf.client_secret,
+      redirect_uri=conf.redirect_uri)
+    """
+  
+  res = getFeatures(song, retryLimit=3, sleepTime=0.3)
+  searchResults[seed] = res
+    
+  
+# save results to file
 with open(json_features_file, "w") as f:
   json.dump(searchResults, f, ensure_ascii=False, indent = 2)
 
   
 """
+res = "trackName;artistName;endTime;msPlayed;TrackID;Popularity;msDuration;Release_day;Uri;Acousticness;Danceability;Energy;Speechiness;Instrumentalness;Liveness;Valence;Loudeness;Tempo;Time_signature;Key;Mode;uri2;id2\n"
+    
+
     for song in songs:
       #seed = f"{song['artistName']}-{song['trackName']}"
       #if seed in song_seeds:
