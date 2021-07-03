@@ -1,5 +1,7 @@
 import json 
 import pandas as pd 
+import ntpath
+import os
 
 from sklearn.cluster import KMeans
 from sklearn.neighbors import NearestCentroid
@@ -20,11 +22,17 @@ from spotipy.oauth2 import SpotifyClientCredentials
 import spotipy.util as util
 
 
+recommender_sleepTime = 0.5
+
 csv_folder = "../listening-history/csv/"
 output_folder = "../songset/"
-min_msPlayed = 10000
+minSongsHour = 10
+minMsPlayed = 10000
+#maxClusters = 10
+#num_tracks = 100
 maxClusters = 10
-num_tracks = 100
+numTracks = 100
+
 
 # loads csv data into a dataframe.
 # filters songs by size (length >= min_ms_played)
@@ -228,34 +236,32 @@ def best_k_means(df, maxClusters=10, approach="exclude_K_less_4_songs"):
   
   # if no k satisfies the condition #songs-in-cluster >= 4, return all the songs (i.e. one cluster) - *S2.1*
   try:
-    print("\tbest number of clusters = ", len(bcl))
-    print("\tbestDB = ", bDB)
+    print("\t* best number of clusters = ", len(bcl))
+    print("\t* bestDB = ", bDB)
     # restituisce il numero di cluster e le liste con i numeri di riga degli elementi in ogni cluster (centro incluso)
     return {"best-length": len(bcl), "best-index-list": bcl, "best-centroids": centroids, "best-labels": bLabels}
   except:
-    print("\tWARNING: best number of clusters = 1")
-    #bcl = list()
-    #for index in range(0, df.shape[0]):
-    #  bcl.append(index)
-    
-    #bcl=list(range(0, df.shape[0]))
-    #K = kmeans.labels_
+    print("\t* WARNING: best number of clusters = 1")
+    # Aggiungo una canzone con feat. sintetiche (random) al songset e la considero l'unica del secondo cluster, 
+    # così posso calcolare il centroide del mio unico cluster 
+    df_temp2 = df.copy(deep=True)
+    df_temp2.loc[-1] = np.random.randn(12).tolist()
+
+    # creo labels dei cluster (tutti 0 tranne uno ad 1 in fondo per la canzone aggiunta) 
     temp = [0 for i in range(0, df.shape[0])]
     temp.append(1)
     K_temp = pd.Series(temp)
 
-    df_temp2 = df.copy(deep=True)
-    df_temp2.loc[-1] = np.random.randn(12).tolist()
-    
+    # calcolo clusters
     clf = NearestCentroid()
     clf.fit(df_temp2, K_temp)
     centroids_temp = clf.centroids_
-    #print(centroids)
     
+    # creo valori "giusti" da ritornare
     bcl = list()
     bcl.append([0 for i in range(0, df.shape[0])])
     centroids = np.delete(centroids_temp, 1, axis=0)
-    bLabels = pd.Series([0 for i in range(0, df.shape[0])])
+    bLabels = np.array([0 for i in range(0, df.shape[0])])
     return {"best-length": 1, "best-index-list": bcl, "best-centroids": centroids, "best-labels": bLabels}
 
 def linearHeuristic(df, best_Kmeans):
@@ -506,17 +512,18 @@ def recommenderPrevNextSong(songs, numSongs, useFeatures=True, retryLimit=3):
 	return recommended_playlist
 """
 
-def isSongInSongsList(trackId, songs):
+def isSongInSongsList(trackId, songsList, results):
+  songs = songsList + results
   found = False
   for song in songs:
-    print(f"Comparing {trackId} - {song['id']}")
+    #print(f"Comparing {trackId} - {song['id']}")
     if trackId == song["id"]:
-      print("Song Found!")
+      print(f"\t\t* Song Found! trackId: {trackId}")
       found = True
       break
   return found
   
-def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3):
+def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3, sleepTime=0.5, maxRequests=3):
   
   results = list()
   #client_credentials_manager = SpotifyClientCredentials(client_id=conf.client_id, client_secret=conf.client_secret)
@@ -530,15 +537,29 @@ def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3
   
   #print(f"len features = {len(features)}")
   retry = 0
-  #found = False
-  while token and retry < retryLimit and num_songs > 0: #(not found): #and token: 
+  numRequests = 0
+  foundSongs = 0
+  #print(foundSongs, num_songs)
+  while token and retry < retryLimit and foundSongs < num_songs: #(not found): #and token: 
+    #print("ciao1")
+    time.sleep(sleepTime)
+    #print("ciao2")
     try:
+      numRequests += 1
+      print(f"\t\tnum_songs: {num_songs} - seed_track: {seed_track} (numRequests: {numRequests}/{maxRequests})")
+      # TODO FPOGGI - CONTROLLARE
+      if numRequests <= maxRequests:
+        toRequest = num_songs-foundSongs
+      elif maxRequests < numRequests <= maxRequests+2:
+        toRequest = 100
+      else:
+        print("WARNING IN recommenderGetSongs(): the recommender returned 0 songs.")
+        return results
       sp = spotipy.Spotify(auth=token)
-      #print(f"length features: {len(features)} - acousticness: {features['Acousticness']}")
-      #print(type(features))
       if len(features)>0:
+        #print("Qui-1")
         recomms = sp.recommendations(seed_tracks=[seed_track],
-          limit=num_songs,
+          limit=toRequest,
           target_acousticness=features["Acousticness"],
           danceability=features["Danceability"],
           target_energy=features["Energy"],
@@ -551,33 +572,46 @@ def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3
           target_tempo=features["Tempo"],
           target_time_signature=int(features["Time_signature"]),
           target_valence=features["Valence"])
+        #print("Qui-2")
       else:
-        recomms = sp.recommendations(seed_tracks=[seed_track], limit=num_songs)
-      for track in recomms["tracks"]:
-        track_id = track["id"]
-        features = sp.audio_features(track_id)[0]
-        
-        features["trackName"]  = track["name"]
-        features["artistName"] = " ".join([artist["name"] for artist in track["artists"]])
-        features["popularity"] = track["popularity"]
-        
-        album_id = track["album"]["id"]
-        print(f"URL: https://open.spotify.com/album/{album_id}?highlight=spotify:track:{track_id}")
-        #Acousticness	Danceability	Energy	Speechiness	Instrumentalness	Liveness	Valence	Loudeness	Tempo	Time_signature	Key	Mode
-        
-        if not isSongInSongsList(trackId, songsList):
-          results.append(features)
-          num_songs -= 1
-        
-      #found = True
+        #print("Quo-1")
+        recomms = sp.recommendations(seed_tracks=[seed_track], limit=toRequest)
+        #print("Quo-2")
     except Exception as e:
       print (f"recommenderGetSongs()- Retry #{retry} - song: {seed_track}")
       print(e)
       retry += 1
       time.sleep(5)
     
+    #print(features)
+    #print(recomms)
+    print(f"\t\t\tLength results = {len(results)} - Recommended Songs = {len(recomms['tracks'])}")
+    for track in recomms["tracks"]:
+      # TODO FPOGGI - CONTROLLARE
+      track_id = track["id"]
+      #print(track_id)
+      track_features = sp.audio_features(track_id)[0]
+      
+      track_features["trackName"]  = track["name"]
+      track_features["artistName"] = " ".join([artist["name"] for artist in track["artists"]])
+      track_features["popularity"] = track["popularity"]
+       
+      album_id = track["album"]["id"]
+      #print(f"URL: https://open.spotify.com/album/{album_id}?highlight=spotify:track:{track_id}")
+      #Acousticness	Danceability	Energy	Speechiness	Instrumentalness	Liveness	Valence	Loudeness	Tempo	Time_signature	Key	Mode
+      
+      if not isSongInSongsList(track_id, songsList, results):
+        results.append(track_features)
+        #num_songs -= 1
+        foundSongs += 1
+      if foundSongs >= num_songs:
+        #print("\n\n*** QUI QUI QUI ***")
+        break
+    print(f"\t\t\tLength results = {len(results)}")
+    
+    
     if retry >= retryLimit:
-      print ("ERROR: recommenderGetSongs() retry limit {retryLimit} - song: {seed_track}")
+      print (f"ERROR: recommenderGetSongs() retry limit {retryLimit} - song: {seed_track}")
       sys.exit()
   
   return results
@@ -588,12 +622,31 @@ def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3
 
 
 
-def saveSongset(songsList, folderName, fileName):
+def saveSongset(songsList, folderName, fileBasename, time_hour, numberOfCluster, cluster_method, heuristic_method):
+  
+  if type(time_hour) == str and len(time_hour) != 2:
+    print("ERROR in saveSongset()")
+    sys.exit()
+  if type(time_hour) == int:
+    time_hour = "{:02d}".format(time_hour)
+  
+  if type(numberOfCluster) == str and len(numberOfCluster) != 2:
+    print("ERROR in saveSongset()")
+    sys.exit()
+  if type(numberOfCluster) == int:
+    numberOfCluster = "{:02d}".format(numberOfCluster)
+  
+  
   #{'danceability': 0.582, 'energy': 0.314, 'key': 2, 'loudness': -11.886, 'mode': 0, 'speechiness': 0.313, 'acousticness': 0.458, 'instrumentalness': 0.342, 'liveness': 0.0986, 'valence': 0.427, 'tempo': 73.525, 'type': 'audio_features', 'id': '5KBiox7vnG3cnljh8MPBp8', 'uri': 'spotify:track:5KBiox7vnG3cnljh8MPBp8', 'track_href': 'https://api.spotify.com/v1/tracks/5KBiox7vnG3cnljh8MPBp8', 'analysis_url': 'https://api.spotify.com/v1/audio-analysis/5KBiox7vnG3cnljh8MPBp8', 'duration_ms': 92168, 'time_signature': 1, 'trackName': 'altissima', 'artistName': 'evän', 'popularity': 38}
   results = "track_id	acousticness	danceability	energy	instrumentalness	key	liveness	loudness	mode	speechness	tempo	time_signature	valence\n"
   for song in songsList:
     results += f"{song['id']}\t{song['acousticness']}\t{song['danceability']}\t{song['energy']}\t{song['instrumentalness']}\t{song['key']}\t{song['liveness']}\t{song['loudness']}\t{song['mode']}\t{song['speechiness']}\t{song['tempo']}\t{song['time_signature']}\t{song['valence']}\n"
-  with open(f"{folderName}/{fileName}", 'w') as f:
+  
+  outdir = f"{folderName}/{fileBasename}/"
+  if not os.path.exists(outdir):
+    os.makedirs(outdir)
+  
+  with open(f"{outdir}/{time_hour}-{cluster_method}_{numberOfCluster}_{heuristic_method}_{len(songsList)}.tsv", 'w') as f:
     f.write(results)
   
 
@@ -601,23 +654,33 @@ def saveSongset(songsList, folderName, fileName):
 
 
 
-# cluster_method: "kmeans|fbf"
-def generateSongset(csv_file, output_folder, cluster_method="kmeans", heuristic_method="linear", min_songs_hour=10, min_msPlayed=10000):
+# cluster_method: "KM|FBF"
+# heuristic_method = "LINEAR|SPHERE"
+def generateSongset(csv_file, output_folder, cluster_method="KM", heuristic_method="LINEAR", min_songs_hour=10, min_ms_played=10000, max_clusters=10, num_tracks=100):
   
-  df = loadData(csv_file, min_msPlayed)
+  print(csv_file)
+  if ".csv" not in csv_file and ".tsv" not in csv_file:
+    print("ERROR: only tsv and csv input files are allowed. Skip file.")
+    
+  cluster_method = cluster_method.upper()
+  heuristic_method = heuristic_method.upper()
+  
+  df = loadData(csv_file, min_ms_played)
   
   # 3.1
   ntna_ntka = computeNTNA_NTKA(df)
     
   for time_hour in range(0,24):
+    #if time_hour < 14:
+    #  continue
+    
     # 3.2 - FILTERING
     df_h = songs_byHour(df, time_hour)
     
     # Remove duplicate songs
     df_h.drop_duplicates(subset ="TrackID", keep = False, inplace = True)
     
-    #df = df[df["time-hour"] == str(time_hour)]
-    print(f"num songs = {df_h.shape[0]}")
+    # controllo su numero di canzoni nella fascia oraria 
     if df_h.shape[0] < min_songs_hour:
       print(f"* hour {time_hour}: skip ({df_h.shape[0]} songs).")
       continue
@@ -626,9 +689,10 @@ def generateSongset(csv_file, output_folder, cluster_method="kmeans", heuristic_
     #3.3 - CLUSTERING
     df_h_feat = df_h[["Acousticness", "Danceability", "Energy", "Instrumentalness", "Key", "Liveness", "Loudeness", "Mode", "Speechiness", "Tempo", "Time_signature", "Valence"]]
     
-    if cluster_method == "kmeans":
-      best_clustering = best_k_means(df_h_feat, maxClusters, "exclude_K_less_4_songs") #"exclude_cluster_less_4_songs")
-    elif cluster_method == "fbf":
+    if cluster_method == "KM":
+      best_clustering = best_k_means(df_h_feat, max_clusters, "exclude_K_less_4_songs") #"exclude_cluster_less_4_songs")
+      #print(best_clustering)
+    elif cluster_method == "FBF":
       print(f"ERROR in generateSongset(): {cluster_method} not yet implemented. Exit.")
       sys.exit()
     else:
@@ -639,19 +703,19 @@ def generateSongset(csv_file, output_folder, cluster_method="kmeans", heuristic_
     numReqs_perPoint = int(num_tracks/(4*kLength)) + 1
     feature_names = ["Acousticness","Danceability","Energy","Speechiness","Instrumentalness","Liveness","Valence","Loudeness","Tempo","Time_signature","Key","Mode"]
 
-    """
     ########################
     ### LINEAR HEURISTIC ###
     ########################
-    if heuristic_method == "linear":
+    if heuristic_method == "LINEAR":
       linear_kMeans = linearHeuristic(df_h, best_clustering)
       ###########################
       ### RECOMMENDER SPOTIFY ###
       ###########################
       results = list()
+      kIndex = 0
       for df_group in linear_kMeans:
         # FIRST SONG
-        print(f"SONG #1")
+        print(f"\t{time_hour}) CLUSTER KM #{kIndex}/{kLength} - SONG #0/4")
         firstPoint = df_group.iloc[0]
         trackId = firstPoint["TrackID"]
         # get features
@@ -659,29 +723,32 @@ def generateSongset(csv_file, output_folder, cluster_method="kmeans", heuristic_
         features = dict()
         for index in range(0,len(centroidFeatures_list)):
           features[feature_names[index]] = centroidFeatures_list[index]
-        tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
+        tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=2, sleepTime=recommender_sleepTime)
         results.extend(tracks)
-        print(len(results))
-        #res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", numReqs_perPoint, list(), retryLimit=1)
+        #print(len(results))
+        #res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", numReqs_perPoint, list(), retryLimit=2, sleepTime=recommender_sleepTime)
         # OTHER THREE SONGS
         for i in range(1,4):
-          print(f"SONG #{i}")
+          print(f"\t{time_hour}) CLUSTER KM #{kIndex}/{kLength} - SONG #{i}/4")
           point = df_group.iloc[i]
           trackId = point["TrackID"]
-          tracks = recommenderGetSongs(trackId, point, numReqs_perPoint, results, retryLimit=1)
+          tracks = recommenderGetSongs(trackId, point, numReqs_perPoint, results, retryLimit=2, sleepTime=recommender_sleepTime)
           results.extend(tracks)
-          print(len(results))
+          #print(len(results))
+        kIndex += 1
     
     ########################
     ### SPHERE HEURISTIC ###
     ########################  
-    elif heuristic_method == "sphere":
+    elif heuristic_method == "SPHERE":
       sphere_kMeans = sphereHeuristic(df_h, best_clustering)
+      
       ###########################
       ### RECOMMENDER SPOTIFY ###
       ###########################
       results = list()
       for item in sphere_kMeans:
+        print(f"\t{time_hour}) {kLength} CLUSTER FPF - SONG #{item['index']}/{len(sphere_kMeans)}")
         #{"index": minDistSongIndex, "randomPoint": currRandomPoint, "minDistSong": minDistSong, "minDist": minDist}
         randomPoint = item["randomPoint"]
         features = dict()
@@ -691,17 +758,15 @@ def generateSongset(csv_file, output_folder, cluster_method="kmeans", heuristic_
         #  features[feature_names[index]] = centroidFeatures_list[index]
         clusterMinDistSong = item["minDistSong"]
         trackId = clusterMinDistSong["TrackID"]
-        tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=1)
+        tracks = recommenderGetSongs(trackId, features, numReqs_perPoint, results, retryLimit=2, sleepTime=recommender_sleepTime)
         results.extend(tracks)
-      
     else:
       print(f"ERROR in generateSongset(): heuristic {cluster_method} not defined. Exit.")
       sys.exit()
       
-    print(results)
-    saveSongset(results, output_folder, "prova.tsv")
-    sys.exit()
-    """
+    #print(results)
+    output_file_start = ntpath.basename(csv_file).replace(".csv","").replace(".tsv","")
+    saveSongset(results, output_folder, output_file_start, time_hour, kLength, cluster_method, heuristic_method)
 
 
 
@@ -715,7 +780,9 @@ contents = glob(f"{csv_folder}*.csv")
 contents.sort()
 for csv_file in contents:
   print (csv_file)
-  generateSongset(csv_file, output_folder, "kmeans", "linear", 10, min_msPlayed)
+  for clusterMethod in ["KM"]:
+    for heuristic in ["LINEAR","SPHERE"]:
+      generateSongset(csv_file, output_folder, clusterMethod, heuristic, min_songs_hour=minSongsHour, min_ms_played=minMsPlayed, max_clusters=maxClusters, num_tracks=numTracks) #min_songsHour = 10 min_msPlayed = 10000
 
 
 
