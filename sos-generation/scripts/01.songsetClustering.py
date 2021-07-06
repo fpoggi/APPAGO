@@ -25,10 +25,10 @@ import mylib
 
 recommender_sleepTime = 0.5
 
-csv_folder = "../listening-history/csv/"
-output_folder = "../songset/"
+csv_folder = "../data/input/listening-history-csv/" #"../listening-history/csv/"
+output_folder = "../data/process/songset/" #"../songset/"
 minSongsHour = 10
-minMsPlayed = 10000
+minMsPlayed = 30000
 #maxClusters = 10
 #num_tracks = 100
 maxClusters = 10
@@ -328,7 +328,7 @@ def sphereHeuristic(df, best_Kmeans, num_track = 50):
   kCentroids = best_Kmeans["best-centroids"]
   kLabels = best_Kmeans["best-labels"]
 
-  print(f"sphereHeuristic(): number of flusters = {kLength}")
+  print(f"sphereHeuristic(): number of clusters = {kLength}")
   #sys.exit()
   
   # add cluster labels to the DF
@@ -560,6 +560,7 @@ def recommenderGetSongs(seed_track, features, num_songs, songsList, retryLimit=3
       print(e)
       retry += 1
       time.sleep(5)
+      continue
     
     #print(features)
     #print(recomms)
@@ -643,20 +644,20 @@ def generateSongset(csv_file, output_folder, cluster_method="KM", heuristic_meth
   cluster_method = cluster_method.upper()
   heuristic_method = heuristic_method.upper()
   
-  df = mylib.loadData(csv_file, min_ms_played)
+  df = mylib.loadData(csv_file, min_ms_played, delimiter="\t")
   
   # 3.1
   ntna_ntka = computeNTNA_NTKA(df)
     
   for time_hour in range(0,24):
-    #if time_hour < 14:
-    #  continue
+    if time_hour < 21:
+      continue
     
     # 3.2 - FILTERING
     df_h = songs_byHour(df, time_hour)
     
     # Remove duplicate songs
-    df_h.drop_duplicates(subset ="TrackID", keep = False, inplace = True)
+    df_h.drop_duplicates(subset ="TrackID", keep = "first", inplace = True)
     
     # controllo su numero di canzoni nella fascia oraria 
     if df_h.shape[0] < min_songs_hour:
@@ -707,7 +708,7 @@ def generateSongset(csv_file, output_folder, cluster_method="KM", heuristic_meth
         #res = recommenderGetSongs("7CDaY0pk8qGFoahgxVVbaX", numReqs_perPoint, list(), retryLimit=2, sleepTime=recommender_sleepTime)
         # OTHER THREE SONGS
         for i in range(1,4):
-          print(f"\t{time_hour}) CLUSTER KM #{kIndex}/{kLength} - SONG #{i}/4")
+          print(f"\t{time_hour}) CLUSTER KM LINEAR #{kIndex}/{kLength} - SONG #{i}/4")
           point = df_group.iloc[i]
           trackId = point["TrackID"]
           tracks = recommenderGetSongs(trackId, point, numReqs_perPoint, results, retryLimit=2, sleepTime=recommender_sleepTime)
@@ -726,7 +727,7 @@ def generateSongset(csv_file, output_folder, cluster_method="KM", heuristic_meth
       ###########################
       results = list()
       for item in sphere_kMeans:
-        print(f"\t{time_hour}) {kLength} CLUSTER FPF - SONG #{item['index']}/{len(sphere_kMeans)}")
+        print(f"\t{time_hour}) {kLength} CLUSTER KM SPHERE - SONG #{item['index']}/{len(sphere_kMeans)}")
         #{"index": minDistSongIndex, "randomPoint": currRandomPoint, "minDistSong": minDistSong, "minDist": minDist}
         randomPoint = item["randomPoint"]
         features = dict()
@@ -759,7 +760,7 @@ contents.sort()
 for csv_file in contents:
   print (csv_file)
   for clusterMethod in ["KM"]:
-    for heuristic in ["LINEAR","SPHERE"]:
+    for heuristic in ["SPHERE"]: #["LINEAR","SPHERE"]:
       generateSongset(csv_file, output_folder, clusterMethod, heuristic, min_songs_hour=minSongsHour, min_ms_played=minMsPlayed, max_clusters=maxClusters, num_tracks=numTracks) #min_songsHour = 10 min_msPlayed = 10000
 
 
